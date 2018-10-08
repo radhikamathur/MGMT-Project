@@ -1,0 +1,22 @@
+{
+    "collab_server" : "",
+    "contents" : "",
+    "created" : 1539029631920.000,
+    "dirty" : false,
+    "encoding" : "UTF-8",
+    "folds" : "",
+    "hash" : "0",
+    "id" : "B7499EA2",
+    "lastKnownWriteTime" : 1537566671,
+    "last_content_update" : 1537566671,
+    "path" : "~/Dropbox/Postdoc/MGMT project/RScriptBoxPlot.R",
+    "project_path" : null,
+    "properties" : {
+        "cursorPosition" : "26,65",
+        "scrollLine" : "22"
+    },
+    "relative_order" : 2,
+    "source_on_save" : false,
+    "source_window" : "",
+    "type" : "r_source"
+}

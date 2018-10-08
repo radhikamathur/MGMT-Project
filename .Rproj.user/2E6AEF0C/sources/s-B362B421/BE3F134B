@@ -1,0 +1,29 @@
+{
+    "collab_server" : "",
+    "contents" : "",
+    "created" : 1539035793231.000,
+    "dirty" : false,
+    "encoding" : "",
+    "folds" : "",
+    "hash" : "0",
+    "id" : "BE3F134B",
+    "lastKnownWriteTime" : 7162247809296506964,
+    "last_content_update" : 1539035793231,
+    "path" : null,
+    "project_path" : null,
+    "properties" : {
+        "cacheKey" : "E48FB65D",
+        "caption" : "agdata_recurrence",
+        "contentUrl" : "grid_resource/gridviewer.html?env=&obj=agdata_recurrence&cache_key=E48FB65D",
+        "displayedObservations" : 22,
+        "environment" : "",
+        "object" : "agdata_recurrence",
+        "preview" : 0,
+        "totalObservations" : 22,
+        "variables" : 5
+    },
+    "relative_order" : 8,
+    "source_on_save" : false,
+    "source_window" : "",
+    "type" : "r_dataframe"
+}

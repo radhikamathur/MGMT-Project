@@ -1,0 +1,29 @@
+{
+    "collab_server" : "",
+    "contents" : "",
+    "created" : 1539034227339.000,
+    "dirty" : false,
+    "encoding" : "",
+    "folds" : "",
+    "hash" : "0",
+    "id" : "2204B5F0",
+    "lastKnownWriteTime" : 8589934591,
+    "last_content_update" : 1539034227339,
+    "path" : null,
+    "project_path" : null,
+    "properties" : {
+        "cacheKey" : "6500416B",
+        "caption" : "agdata_Infinium",
+        "contentUrl" : "grid_resource/gridviewer.html?env=&obj=agdata_Infinium&cache_key=6500416B",
+        "displayedObservations" : 53,
+        "environment" : "",
+        "object" : "agdata_Infinium",
+        "preview" : 0,
+        "totalObservations" : 53,
+        "variables" : 4
+    },
+    "relative_order" : 6,
+    "source_on_save" : false,
+    "source_window" : "",
+    "type" : "r_dataframe"
+}

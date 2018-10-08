@@ -1,0 +1,42 @@
+library(ggpubr)
+
+dirPath <- '~/Dropbox/Postdoc/MGMT Project/'
+hypermutated <- read.csv(file.path(dirPath, "Graph_hypermutated.csv"))
+nonhypermutated <- read.csv(file.path(dirPath, "Graph_nonhypermutated.csv"))
+
+pdf("~/Dropbox/Postdoc/MGMT Project/MGMT Boxplots.pdf", 7, 6)
+
+par(mar=c(8.1, 4.1, 4.1, 2.1))
+
+boxplot (hypermutated$pred~hypermutated$Tumor*hypermutated$Patient, col=(c("gold","darkgreen")), medcol=(c("gold","darkgreen")), main="Hypermutated At Recurrence", las=2)
+abline(h = 0.358, col = "red", lwd = 2)
+legend("bottomright", legend=c("Primary", "Recurrence"), text.col=c("gold","darkgreen"))
+
+boxplot (nonhypermutated$pred~nonhypermutated$Tumor*nonhypermutated$Patient, col=(c("gold","darkgreen")), medcol=(c("gold","darkgreen")), main="Non-hypermutated At Recurrence", las=2, abline(h = 0.358, col = "red", lwd = 3))
+abline(h = 0.358, col = "red", lwd = 2)
+legend("bottomright", legend=c("Primary", "Recurrence"), text.col=c("gold","darkgreen"))
+
+dev.off()
+
+data <-read.csv(file.path(dirPath, "Graph_all.csv"))
+agdata <- aggregate(data$MGMT_pred, by=list(patient=data$Patient, tumor=data$Tumor, HM_status=data$HM_status), mean)
+boxplot(agdata$x~agdata$tumor*agdata$HM_status, col=(c("gold","darkgreen")))
+agdata$description = paste0(agdata$tumor, agdata$HM_status)
+
+agdata_primary <- agdata[which(agdata$tumor == 'Primary'),]
+agdata_recurrence <- agdata[which(agdata$tumor == 'Recurrence'),]
+
+
+t.test(pred~Tumor, data = hypermutated)$p.value #Primary v. Recurrence Within Hypermutated
+t.test(pred~Tumor, data = nonhypermutated)$p.value #Primary v. Recurrence Within Non-Hypermutated
+t.test(x~HM_status, data = agdata_primary)$p.value # HM v. non_HM within Primary
+t.test(x~HM_status, data = agdata_recurrence)$p.value # HM v. non_HM within Recurrence
+
+compare_means(x ~ tumor, data = agdata, group.by = "HM_status")
+compare_means(x ~ HM_status, data = agdata, group.by = "tumor")
+
+p <- ggboxplot(agdata, x = "tumor", y ="x", color = "tumor", palette = "jco", add = "jitter", facet.by = "HM_status", short.panel.labs = FALSE)
+p + stat_compare_means(label = "p.format")
+
+p <- ggboxplot(agdata, x = "HM_status", y ="x", color = "HM_status", palette = "JAMA", add = "jitter", facet.by = "tumor", short.panel.labs = FALSE)
+p + stat_compare_means(label = "p.format")

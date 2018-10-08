@@ -1,0 +1,24 @@
+{
+    "collab_server" : "",
+    "contents" : "",
+    "created" : 1539029327038.000,
+    "dirty" : false,
+    "encoding" : "UTF-8",
+    "folds" : "",
+    "hash" : "0",
+    "id" : "C41513F2",
+    "lastKnownWriteTime" : 1539036041,
+    "last_content_update" : 1539036041853,
+    "path" : "~/Dropbox/Postdoc/MGMT project/BSAS Results/BSAS Analysis R Project/Scatterplot comparing Infinium and BSAS data.R",
+    "project_path" : "Scatterplot comparing Infinium and BSAS data.R",
+    "properties" : {
+        "cursorPosition" : "29,0",
+        "docOutlineVisible" : "0",
+        "scrollLine" : "12",
+        "tempName" : "Untitled1"
+    },
+    "relative_order" : 1,
+    "source_on_save" : false,
+    "source_window" : "",
+    "type" : "r_source"
+}
