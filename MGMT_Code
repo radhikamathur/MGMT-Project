@@ -1,0 +1,595 @@
+#dependencies
+library(pacman)
+p_load(matrixStats, ggplot2, reshape2, EnvStats, ggpubr, ggsignif, psych, pheatmap, RColorBrewer, dplyr, plyr, table1, cowplot, magick, writexl, tidyverse, data.table, caret, plotROC, lmtest, ROCR, aod, survey, partDSA, rpart, gmodels, survival, survminer, gridExtra)
+options(digits = 3)
+
+#functions
+as.numeric.factor <- function(x) {as.numeric(levels(x))[x]}
+
+#data import
+dirPath <- '~/Dropbox/Postdoc/Papers/MGMT Paper/Code'
+data_identifiers <- read.csv(file.path(dirPath, "Sample_info.csv"))
+allCGs <- read.csv(file.path(dirPath, "BSAS_data.csv"), check.names=FALSE)
+patientannotations <- read.csv(file.path(dirPath, "Patient_Annotations.csv"))
+Infinium <- read.csv(file.path(dirPath, "Infinium.csv"))
+RNA <- read.csv(file.path(dirPath, "RNA.csv"))
+Mutation <- read.csv(file.path(dirPath, "MutationData.csv"))
+Outcomes <- read.csv(file.path(dirPath, "ClinicalOutcomes.csv"))
+Classification <- read.csv(file.path(dirPath, "Classification.csv"))
+
+#data organization
+BySample <- merge(data_identifiers, allCGs, by = "Sample")
+BySample$PercentMethylation <- rowMeans(BySample[,7:33], na.rm = TRUE)
+ByPatient <- aggregate(BySample$PercentMethylation, by = list(Patient = BySample$Patient, Tumor=BySample$Tumor, mol_type=BySample$mol_type, HM_status=BySample$HM_status), mean, na.rm= TRUE)
+colnames(ByPatient)[which(names(ByPatient) == "x")] <- "Percent_Methylation"
+ByPatient$TumorType <- paste0(ByPatient$Tumor, "_", ByPatient$HM_status)
+AnnotatedPatients <- merge(ByPatient, patientannotations, by="Patient", all.x=TRUE)
+
+##########################################
+# TABLE 1 (Description of patient cohort)
+##########################################
+
+Dem <- AnnotatedPatients[which(AnnotatedPatients$Tumor == "Initial"),]
+Dem <- select(Dem, mol_type, Age.at.diagnosis, Sex, Grade.at.recurrence, TMZ.cycles.prior.to.recurrence,HM_status)
+Dem$Grade.at.recurrence <- as.factor(Dem$Grade.at.recurrence)
+Dem$mol_type <- revalue(Dem$mol_type, c("A" = "Astrocytoma"))
+Dem$mol_type <- revalue(Dem$mol_type, c("O" = "Oligodendroglioma"))
+Dem$Grade.at.recurrence <- revalue(Dem$Grade.at.recurrence, c("2" = "II"))
+Dem$Grade.at.recurrence <- revalue(Dem$Grade.at.recurrence, c("3" = "III"))
+Dem$Grade.at.recurrence <- revalue(Dem$Grade.at.recurrence, c("4" = "IV"))
+
+table1::label(Dem$mol_type) <- "Molecular Subtype"
+table1::label(Dem$Age.at.diagnosis) <- "Age at diagnosis"
+table1::label(Dem$Grade.at.recurrence) <- "Grade at recurrence"
+table1::label(Dem$TMZ.cycles.prior.to.recurrence) <- "TMZ cycles"
+table1::label(Dem$HM_status) <- "HM status at recurrence"
+
+#table1::table1(~Age.at.diagnosis + Sex + TMZ.cycles.prior.to.recurrence + Grade.at.recurrence + HM_status | mol_type, data = Dem)
+
+describe(Dem$Age.at.diagnosis, quant=c(0.25, 0.75))
+describe.by(Dem$Age.at.diagnosis, Dem$mol_type, quant=c(0.25, 0.75))
+describe(Dem$TMZ.cycles.prior.to.recurrence, quant=c(0.25, 0.75))
+describe.by(Dem$TMZ.cycles.prior.to.recurrence, Dem$mol_type, quant=c(0.25, 0.75))
+##########################################
+# FIGURE 1
+##########################################
+Mutation <- Mutation[order(-Mutation$Mutation.count),] 
+Mutation$Hypermutation <- relevel(Mutation$Hypermutation, ref = 'Yes')
+MutationFigure <- ggplot(Mutation, aes(x=factor(Patient.ID), y= Mutation.count, fill= Hypermutation))+
+  geom_bar(color = "black", size = 0.25, stat="identity", position=position_dodge2(preserve = "single"))+
+  ylim(0,4000)+
+  facet_grid(. ~ Hypermutation.status.by.patient, scales="free", space="free")+
+  theme(panel.grid.minor = element_blank())+
+  theme_bw(base_size=12)+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), strip.text.x = element_text(size=11), strip.background = element_rect(colour="white", fill="white"), axis.text=element_text(size=11))+
+  labs(x= "Patient ID", y= "Mutation count")+ 
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+
+# Plot by grade at recurrence (Figure 1a)
+Fig1a <- ggplot(data=Dem, aes(x=Grade.at.recurrence))+
+  geom_bar(color="black", stat="count", aes(fill=HM_status))+
+  geom_text(stat="count", aes(label = ..count..), vjust=-0.5)+
+  labs(x="Grade at recurrence", y="Number of patients", fill = "Hypermutation (HM) status")+
+  facet_grid(.~mol_type, scales="free", space="free")+
+  theme(panel.grid.minor = element_blank())+
+  scale_fill_manual(labels = c("HM", "Mixed", "nonHM"), values = c("#F8766D", "#E7B800","#00BFC4"))+ 
+  theme_bw(base_size=11)+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), strip.text.x = element_text(size=11), strip.background = element_rect(colour="white", fill="white"), axis.text=element_text(size=11))+
+  scale_y_continuous(breaks=c(1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24))+
+  theme(legend.position="bottom", legend.text=element_text(size=11))
+
+# Remove mixed samples
+DemNoMixed <- Dem[!(Dem$HM_status == "Mixed"),]
+
+# Plot by age (Figure 1b)
+Fig1b <- ggplot(data=DemNoMixed, aes(x=HM_status, y=Age.at.diagnosis))+
+  geom_boxplot(aes(fill=HM_status), outlier.shape = NA)+
+  geom_jitter()+
+  ylim(15,55)+
+  scale_color_brewer(palette="Dark2")+
+  labs(x=NULL)+
+  stat_compare_means()+
+  facet_grid(.~mol_type, scales="free", space="free")+
+  labs(x="Hypermutation (HM) status", y="Age at diagnosis (years)")+ 
+  theme_bw(base_size=11)+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), strip.text.x = element_text(size=11), strip.background = element_rect(colour="white", fill="white"), axis.text=element_text(size=11))+
+  theme(legend.position="none")
+
+# Plot by TMZ cycles (Figure 1c)
+Fig1c <- ggplot(data=DemNoMixed, aes(x=HM_status, y=TMZ.cycles.prior.to.recurrence))+
+  geom_boxplot(aes(fill=HM_status), outlier.shape = NA)+
+  geom_jitter()+
+  ylim(0,55)+
+  scale_color_brewer(palette="Dark2")+
+  labs(x=NULL)+
+  stat_compare_means()+
+  facet_grid(.~mol_type, scales="free", space="free")+
+  labs(x="Hypermutation (HM) status", y="TMZ cycles received")+ 
+  theme_bw(base_size=11)+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), strip.text.x = element_text(size=11), strip.background = element_rect(colour="white", fill="white"), axis.text=element_text(size=11))+
+  theme(legend.position="none")
+
+Figure1 <- plot_grid(Fig1a, Fig1b, Fig1c, labels = c("a", "b", "c"), nrow = 1,  rel_widths = c(1.2,0.9,0.9))
+#save_plot('~/Dropbox/Postdoc/Papers/MGMT Paper/REVISION/Figure1.tiff', Figure1, base_width = 12, base_height =6, dpi = 300)
+
+#############################################################################################################################
+# FIGURE 2
+##############################################################################################################################
+
+# Comparison with Infinium (Fig 2a)
+InfiniumPlot <- merge(BySample, Infinium, by="Sample")
+Fig2a <- ggplot(InfiniumPlot, aes(x=`174`, y=MGMT_Infinium_cg12981137, color=Tumor)) + 
+  geom_point() + 
+  labs(x= "BSAS (% methylation)", y = "Infinium Array (M value)") +
+  theme(plot.title = element_text(hjust = 0.5, face="bold"))+
+  scale_color_brewer(palette="Set1")+
+  facet_grid(Tumor~., switch = "y")+ 
+  geom_smooth(method=lm, se=FALSE)+
+  stat_cor(method = "pearson", label.x = 3, label.y = 4, size =3)+
+  theme_bw(base_size=8)+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), strip.text.y = element_text(size=8), strip.background = element_rect(colour="white", fill="white"), axis.text=element_text(size=8))+
+  theme(legend.position="none")+ theme(strip.placement = "outside")
+
+#Correlation matrix
+RNAdata <- merge(BySample, RNA, by="Sample", all.x=TRUE)
+RNACorr <- corr.test(RNAdata[,7:34], RNAdata[,35], use="pairwise", method="pearson")
+RNACorrMatrix <- as.data.frame(RNACorr$r)
+RNACorrMatrix$CpG <- rownames(RNACorrMatrix)
+RNACorrMatrix$p <- RNACorr$p
+colnames(RNACorrMatrix)[which(names(RNACorrMatrix) == "V1")] <- "PearsonCorr"
+RNACorrCpG <- RNACorrMatrix[-c(28),]
+
+#Plot Pearson Corr (Fig 2b - upper)
+Fig2bTop <- ggplot(data=RNACorrCpG, aes(x=as.numeric(CpG), y=PearsonCorr)) +
+  geom_line()+
+  geom_point()+
+  labs(x= NULL, y = "Pearson's R")+
+  theme(plot.title = element_text(hjust = 0.5, face="bold"))+
+  scale_color_brewer(palette="Set1")+
+  theme_bw(base_size=8)+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  theme(legend.position="top")+ 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 7), axis.text.y = element_text(size = 8))+
+  scale_x_continuous(limits= c(87,331), breaks = c(93,95,106,113,118,121,125,135,137,142,147,153,174,179,185,195,208,213,225,241,252,255,258,270,291,295,308), labels=c(93,95,106,113,118,121,125,135,137,142,147,153,174,179,185,195,208,213,225,241,252,255,258,270,291,295,308)) 
+
+#Plot p-values (Fig 2b - lower)
+Fig2bBottom <- ggplot(data=RNACorrCpG, aes(x=as.numeric(CpG), y=p)) +
+  geom_line()+
+  geom_point()+
+  labs(x= NULL, y = "Adjusted P values") +
+  theme(plot.title = element_text(hjust = 0.5, face="bold"))+
+  scale_color_brewer(palette="Set1")+
+  theme_bw(base_size=8)+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  theme(legend.position="top")+ 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1, size = 7), axis.text.y = element_text(size = 8))+
+  geom_hline(yintercept = 0.05, color = "red", linetype =2)+
+  annotate("text", x = 325, y = 0.15, label = "P = 0.05", color = "red", size = 3)+
+  scale_x_continuous(limits= c(87,331), breaks = c(93,95,106,113,118,121,125,135,137,142,147,153,174,179,185,195,208,213,225,241,252,255,258,270,291,295,308), labels=c(93,95,106,113,118,121,125,135,137,142,147,153,174,179,185,195,208,213,225,241,252,255,258,270,291,295,308)) 
+
+Fig2bAnnotation <- ggdraw()+
+  draw_image(file.path(dirPath,"SequenceAnnotation.png"))
+
+Fig2b <- plot_grid(Fig2bTop, Fig2bBottom, Fig2bAnnotation, nrow = 3, rel_heights = c(0.6,0.6,0.4))
+Figure2 <- plot_grid(Fig2a, Fig2b, labels = c("a", "b"), label_size = 10, nrow = 1, rel_widths = c(1, 2.5))
+#save_plot('~/Dropbox/Postdoc/Papers/MGMT Paper/REVISION/Figure2.tiff', Figure2, base_width = 8.5, base_height =4, dpi = 300)
+
+##############################################################################################################################
+# FIGURE 3
+##############################################################################################################################
+
+# Heatmaps of recurrences by sample (FIGURE 3a,b)
+BySample_Recurrences <- BySample[which(BySample$Tumor == "Recurrence"),]
+BySample_Recurrences$HM_by_sample <- relevel(BySample_Recurrences$HM_by_sample, ref = 'Yes')
+
+annotation_row = BySample_Recurrences[c("mol_type", "HM_by_sample")]
+colnames(annotation_row)[which(names(annotation_row) == "mol_type")] <- "Subtype"
+colnames(annotation_row)[which(names(annotation_row) == "HM_by_sample")] <- "Hypermutation"
+labels_row = as.factor(BySample_Recurrences$Patient)
+pheatmap(BySample_Recurrences[,7:33], cluster_cols=FALSE, annotation_row = annotation_row, labels_row = labels_row, annotation_names_row=F, clustering_method = "ward", cutree_rows = 2)
+Fig3a  <- ggdraw()+
+  draw_image(file.path(dirPath,"Heatmap_all27_Revision.png"))
+
+
+# MGMT RNA v. hypermutation status
+colnames(RNAdata)[which(names(RNAdata) == "HM_by_sample")] <- "Hypermutation"
+colnames(RNAdata)[which(names(RNAdata) == "mol_type")] <- "Subtype"
+RNAdata<- mutate(RNAdata, Hypermutation = relevel(Hypermutation, ref = 'Yes'))
+
+Fig3b <- ggplot(data=RNAdata[which(RNAdata$Tumor == "Recurrence"),], aes(x=Hypermutation, y=MGMT_RNA2))+
+  geom_boxplot(aes(fill=Hypermutation), outlier.shape = NA)+
+  geom_jitter(aes(shape=Subtype))+
+  #facet_grid(.~Tumor, scales="free", space="free")+
+  stat_compare_means()+
+  ylim(6,10)+
+  labs(x= "Hypermutation", y = "RNA log count")+
+  theme_bw(base_size=11)+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), strip.text.x = element_text(size=11), strip.background = element_rect(colour="white", fill="white"), axis.text=element_text(size=11))+
+  scale_shape_manual(labels = c("Astrocytoma", "Oligodendroglioma"), values=c(17, 19))
+
+
+Fig3c <- ggplot(data=RNAdata[which(RNAdata$Tumor == "Recurrence"),], aes(x=PercentMethylation, y=MGMT_RNA2))+
+  geom_point(aes(color=Hypermutation, shape=Subtype))+
+  #facet_grid(.~Tumor, scales="free", space="free")+
+  geom_smooth(method=lm, color= "grey", se=FALSE)+
+  scale_shape_manual(labels = c("Astrocytoma", "Oligodendroglioma"), values=c(17, 19))+
+  labs(x= "Average Methylation (%)", y = "RNA log count")+
+  ylim(6,10)+
+  theme_bw()+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  stat_cor(method = "pearson", label.x = 3, label.y = 6, size =4)+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), strip.text.x = element_text(size=11), strip.background = element_rect(colour="white", fill="white"), axis.text=element_text(size=11))
+
+Fig3bc <- plot_grid(Fig3b, Fig3c, labels = c("b", "c"), nrow = 2)
+Figure3 <- plot_grid(Fig3a, Fig3bc, labels = c("a", ""), nrow = 1, rel_widths = c(1,0.75))
+#save_plot('~/Dropbox/Postdoc/Papers/MGMT Paper/REVISION/Figure3.tiff', Figure3, base_width = 11, base_height =6, dpi = 300)
+
+##############################################################################################################################
+# FIGURE 4
+##############################################################################################################################
+
+Variance <- dcast(BySample_Recurrences, Patient ~ Sample, value.var = "PercentMethylation")
+Variance$variance <- rowVars(x=as.matrix(Variance[,2:54]), na.rm = TRUE)
+Variance <- select(Variance, Patient, variance)
+BySample_Recurrences <- merge(BySample_Recurrences, Variance, by="Patient")
+MultiSample <- na.omit(BySample_Recurrences)
+
+Fig4a <- ggplot(MultiSample, aes(x=factor(Patient), y=PercentMethylation)) +
+  geom_boxplot(aes(fill=HM_status)) +
+  facet_grid(. ~ HM_status, scales = "free", space = "free") +
+  theme(strip.text.x = element_text(size=12), strip.text.y = element_text(size=12)) +
+  labs(x= "Patient ID", y= "Average methylation (%)") +
+  theme_bw(base_size=10)+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), strip.background = element_rect(colour="white", fill="white"))+
+  scale_fill_manual(labels = c("HM", "Mixed", "nonHM"), values = c("#F8766D", "#E7B800","#00BFC4"))+
+  theme(legend.position="none")+ 
+  theme(strip.placement = "outside")
+
+###Bootstrap for recurrent samples
+MGMT_AllSamples <- TableS2 %>% mutate(HM_status = relevel(HM_status, ref = 'nonHM'))
+MGMT_AllSamples <- MGMT_AllSamples[MGMT_AllSamples$Tumor == "Recurrence", ]
+uniq_id <- unique(MGMT_AllSamples$Patient)
+boot_sample <- function(){
+  out_data = NULL
+  sub_data <- MGMT_AllSamples %>% select(Patient, HM_status, PercentMethylation)
+  for (i in seq_along(uniq_id)){
+    temp <- sample_n(sub_data %>% filter(Patient == uniq_id[i]), 1)
+    out_data <- rbind(out_data, temp)
+  }
+  return(out_data)
+}
+
+summarize_boot_sample <- function(boot_sample){
+  overall_mean <- mean(boot_sample$PercentMethylation)
+  overall_sd <- sd(boot_sample$PercentMethylation)
+  by_HM_status <- boot_sample %>% group_by(HM_status) %>% dplyr::summarise(mean = mean(PercentMethylation), sd = sd(PercentMethylation))
+  out = rbind(by_HM_status, data.frame(HM_status = 'Over_all', mean = overall_mean, sd = overall_sd))
+}
+
+n_samples <- 100 # 100 bootstrap sample
+boot_samples_results <- NULL
+set.seed(94065)
+
+for (i in 1:n_samples){
+  current_sample <- boot_sample()
+  current_summary <- cbind(data.frame(sample_id = i, summarize_boot_sample(current_sample)))
+  boot_samples_results <- rbind(boot_samples_results, current_summary)
+}
+
+boot_samples_results <- boot_samples_results[!boot_samples_results$HM_status=="Over_all",]
+
+stats_recurrent <- boot_samples_results%>% group_by(HM_status) %>% dplyr::summarise(mean = mean(mean), sd = sd(sd))
+colnames(stats_recurrent)[which(names(stats_recurrent) == "HM_status")] <- "HM status"
+
+
+# visualize the result
+Fig4b <- ggplot(boot_samples_results, aes(x=mean, color=HM_status, fill=HM_status)) +
+  geom_histogram(aes(y=..density..), position="identity", alpha=0.5)+
+  geom_density(alpha = 0.6) +
+  theme_classic()+
+  theme(legend.position="bottom")+
+  labs(x = "mean of average methylation (%)")+
+  scale_fill_manual(name = "HM status", values = c("#00BFC4", "#F8766D", "#E7B800"))+
+  scale_color_manual(name = "HM status",values = c("#00BFC4", "#F8766D", "#E7B800"))+ 
+  annotation_custom(tableGrob(stats_recurrent, rows = NULL, theme = ttheme_minimal(base_size = 10)), xmin=35, xmax=45, ymin=0.5, ymax=0.55)
+
+
+#Intratumoral analysis 
+Mixed <- BySample[which(BySample$HM_status == "Mixed"),]
+ITHplot <- Mixed[-8,] 
+colnames(ITHplot)[which(names(ITHplot) == "HM_by_sample")] <- "HM"
+ITHplot$HM = relevel(ITHplot$HM, ref = 'Yes')
+patientlabels <- c(`1` = "Patient 1", `33` = "Patient 33", `94` = "Patient 94")
+ITHplot_recurrences <- ITHplot[which(ITHplot$Tumor == "Recurrence"),]
+
+Fig4c <- ggplot(ITHplot_recurrences, aes(x=Tumor, y=PercentMethylation, color=HM)) +
+  geom_jitter(aes(shape=mol_type), size=3)+ 
+  scale_shape_manual(name = "Subtype", labels = c("Astrocytoma", "Oligodendroglioma"), values=c(17, 19))+
+  facet_wrap(Patient~., labeller=labeller(Patient = patientlabels), switch = "x")+
+  labs(x= NULL, y = "Average methylation (%)", color = "Hypermutation")+
+  theme(plot.title = element_text(hjust = 0.5, face="bold"))+
+  scale_color_manual(labels = c("Yes", "No"), values = c("#F8766D", "#00BFC4"))+
+  theme_bw(base_size = 11)+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), strip.background = element_rect(colour="white", fill="white"))+
+  theme(legend.title=element_text(size=10))+
+  theme(axis.title.x=element_blank(),
+        axis.text.x=element_blank(),
+        axis.ticks.x=element_blank())+
+  guides(color =guide_legend(nrow=3, title.position = "top"), shape =guide_legend(nrow=3, title.position = "top"))
+
+
+Fig4bc <- plot_grid(Fig4b, Fig4c, labels = c("b", "c"), nrow = 1)
+Figure4 <- plot_grid(Fig4a, Fig4bc, labels = c("a", ""), nrow = 2, rel_heights = c(1,1.3))
+
+#save_plot('~/Dropbox/Postdoc/Papers/MGMT Paper/REVISION/Figure4.tiff', Figure4, base_width = 8, base_height =7, dpi = 300)
+
+##############################################################################################################################
+# FIGURE 5
+##############################################################################################################################
+
+
+# Methylation landscape by HM status and tumor type (FIGURE 5a)
+allCGs <- merge(data_identifiers, allCGs, by="Sample")
+allCGs_reshape <- melt(allCGs, id.vars = c("Sample", "Patient", "HM_status", "HM_by_sample", "Tumor", "mol_type"))
+colnames(allCGs_reshape)[which(names(allCGs_reshape) == "variable")] <- "CpG"
+colnames(allCGs_reshape)[which(names(allCGs_reshape) == "value")] <- "Percent_Methylation"
+
+agdata_allCGs <- aggregate(allCGs_reshape$Percent_Methylation, by=list(Patient=allCGs_reshape$Patient, Tumor=allCGs_reshape$Tumor, HM_status=allCGs_reshape$HM_status, mol_type = allCGs_reshape$mol_type, CpG = allCGs_reshape$CpG), mean, na.rm= TRUE)
+colnames(agdata_allCGs)[which(names(agdata_allCGs) == "x")] <- "Percent_Methylation"
+
+agdata2_allCGs <- aggregate(agdata_allCGs$Percent_Methylation, by=list(Tumor=agdata_allCGs$Tumor, HM_status=agdata_allCGs$HM_status, CpG = agdata_allCGs$CpG), mean, na.rm= TRUE)
+colnames(agdata2_allCGs)[which(names(agdata2_allCGs) == "x")] <- "Percent_Methylation"
+agdata2_allCGs <- agdata2_allCGs[!(agdata2_allCGs$HM_status == "Mixed"),]
+agdata2_allCGs$TumorType = paste(agdata2_allCGs$Tumor, agdata2_allCGs$HM_status)
+
+Fig5a <- ggplot(data=agdata2_allCGs, aes(x=as.numeric.factor(CpG), y=Percent_Methylation, group=TumorType, color=HM_status)) +
+  geom_line(aes(linetype=Tumor), size=0.75)+
+  geom_point()+
+  labs(x= "CpG sites (+bp from TSS)", y = "Methylation (%)", linetype="Hypermutation (HM) status") +
+  theme(plot.title = element_text(hjust = 0.5, face="bold"))+
+  scale_color_manual(labels = c("HM", "nonHM"), values = c("#F8766D", "#00BFC4"))+
+  theme_bw(base_size=14)+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  theme(legend.position="top")+ 
+  theme(legend.title = element_blank())+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))+
+  scale_x_continuous(limits= c(85,315), breaks = c(93,95,106,113,118,121,125,135,137,142,147,153,174,179,185,195,208,213,225,241,252,255,258,270,291,295,308), labels=c(93,95,106,113,118,121,125,135,137,142,147,153,174,179,185,195,208,213,225,241,252,255,258,270,291,295,308)) 
+
+Figure <- ByPatient
+Figure$mol_type <- revalue(Figure$mol_type, c("A" = "Astrocytoma"))
+Figure$mol_type <- revalue(Figure$mol_type, c("O" = "Oligodendroglioma"))
+colnames(Figure)[which(names(Figure) == "mol_type")] <- "Subtype"
+Figure$TumorType <- factor(Figure$TumorType,
+                           levels = c('Initial_HM','Initial_Mixed','Initial_nonHM','Recurrence_HM','Recurrence_Mixed', 'Recurrence_nonHM'),ordered = TRUE)
+
+#Boxplots by HM status  (FIGURE 5b)
+Fig5b <- ggplot(data=Figure, aes(x=TumorType, y=Percent_Methylation, group=TumorType))+
+  geom_boxplot(aes(fill=HM_status))+
+  geom_jitter(aes(shape=Subtype))+
+  ylim(0, 100)+
+  #stat_mean_sd_text(digits=2,y.pos=100, size = 3.5)+
+  labs(x=NULL, y = "Average methylation (%)")+
+  scale_fill_manual(name = "HM status", labels = c("HM", "Mixed", "nonHM"), values = c("#F8766D", "#E7B800","#00BFC4"))+
+  geom_signif(test=wilcox.test, textsize=4, y_position=c(96,85,75), comparisons=list(c("Initial_HM", "Initial_nonHM"),c("Recurrence_HM", "Recurrence_nonHM")))+
+  theme_bw(base_size=14)+
+  #theme(legend.position="top")+ 
+  scale_shape_manual(values=c(17, 19))+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1), panel.grid.major = element_blank(), panel.grid.minor = element_blank())+
+  scale_x_discrete(labels=c("Initial_HM" = "Initial", "Initial_Mixed" = "Initial",
+                            "Initial_nonHM" = "Initial", "Recurrence_HM" = "Recurrence", "Recurrence_Mixed" = "Recurrence",
+                            "Recurrence_nonHM" = "Recurrence"))
+
+Initials <- ByPatient[which(ByPatient$Tumor == 'Initial'),]
+Recurrences <- ByPatient[which(ByPatient$Tumor == 'Recurrence'),]
+PairedData <- merge(Initials, Recurrences, by = c("Patient", "HM_status", "mol_type"))
+PairedData$Tumor.x <- NULL
+PairedData$Tumor.y <- NULL
+PairedData$TumorType.x <- NULL
+PairedData$TumorType.y <- NULL
+colnames(PairedData)[which(names(PairedData) == "Percent_Methylation.x")] <- "Initial"
+colnames(PairedData)[which(names(PairedData) == "Percent_Methylation.y")] <- "Recurrence"
+PairedData$Change <- PairedData$Recurrence - PairedData$Initial
+
+PairedData <- PairedData[order(-PairedData$Change),]
+PairedData$Patient <- factor(PairedData$Patient, levels = PairedData$Patient)
+
+Fig5c <- ggpaired (PairedData, "Initial", "Recurrence", id = "Patient", fill = "HM_status", palette = c("#F8766D", "#E7B800","#00BFC4"), facet.by = "HM_status", ylab = "Average Methylation (%)", xlab = FALSE, legend = "none")+
+  stat_compare_means(paired = TRUE, label.y = 90)+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), strip.text.x = element_text(size=11), strip.background = element_rect(colour="white", fill="white"), axis.text=element_text(size=11))
+
+Fig5d <- ggplot(PairedData, aes(x=Patient, y= Change, fill= HM_status))+
+  geom_bar(color = "black", size = 0.25, stat="identity")+
+  scale_fill_manual(labels = c("HM", "Mixed", "nonHM"), values = c("#F8766D", "#E7B800","#00BFC4"))+
+  ylim(-50,50)+
+  theme_bw(base_size=14)+
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))+
+  labs(x= "Patient", y= "Average methylation change (%)")+ 
+  theme(legend.title = element_blank())+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank())
+
+#Wilcoxon signed-rank tests for paired data
+wilcox.test(PairedData$Initial[which(PairedData$HM_status == "nonHM")], PairedData$Recurrence[which(PairedData$HM_status == "nonHM")], paired = TRUE)
+wilcox.test(PairedData$Initial[which(PairedData$HM_status == "HM")], PairedData$Recurrence[which(PairedData$HM_status == "HM")], paired = TRUE)
+
+Fig5e <- ggdraw()+
+  draw_image(file.path(dirPath,"PartDSAwithTable.png"))
+
+middlerow <- plot_grid(Fig5b, Fig5c, labels = c("b", "c"), nrow = 1, rel_widths = c(1.2,1))
+bottomrow <- plot_grid(Fig5d, Fig5e, labels = c("d", "e"), nrow = 1, rel_widths = c(1.2,1))
+Figure5 <- plot_grid(Fig5a, middlerow, bottomrow, labels = c("a", "", ""), nrow = 3, rel_widths = c(1,1,1))
+#save_plot('~/Dropbox/Postdoc/Papers/MGMT Paper/REVISION/Figure5.tiff', Figure5, base_width = 13, base_height =12, dpi = 300)
+
+##############################################################################################################################
+# SUPPLEMENTARY FIGURE 1
+##############################################################################################################################
+
+OverallSurvival <- Surv(time = Outcomes$days_to_death_or_last_fu, event = Outcomes$death_censor)
+OverallSurvival_All <- survfit(OverallSurvival ~Subtype + Hypermutation, data=Outcomes)
+FigureS1 <- ggsurvplot(OverallSurvival_All, data=Outcomes, pval=TRUE, pval.method=TRUE, risk.table = TRUE, title = "Overall survival", 
+           xscale ="d_y", break.time.by=365.25, linetype = "Hypermutation", color="Subtype", palette = "Set1", xlab = "Time (years)"
+)
+
+##############################################################################################################################
+# SUPPLEMENTARY FIGURE 2
+##############################################################################################################################
+
+FigureS2  <- ggdraw()+
+  draw_image(file.path(dirPath,"Heatmap_3_Revision.png"))
+
+#save_plot('~/Dropbox/Postdoc/Papers/MGMT Paper/REVISION/FigureS2.tiff', FigureS2, base_width = 3, base_height =6, dpi = 300)
+
+
+##############################################################################################################################
+# LOGISTIC REGRESSION
+##############################################################################################################################
+
+ForRegression <- dcast(agdata_allCGs, Patient + Tumor + HM_status + mol_type ~ CpG)
+ForRegression$PercentMethylation <- rowMeans(ForRegression[,5:31], na.rm = TRUE)
+ForRegression <- ForRegression[which(ForRegression$Tumor == "Initial"),]
+ForRegression <- merge(ForRegression, patientannotations, by= "Patient", all.x=TRUE)
+ForRegression$HM_status[ForRegression$HM_status == "Mixed"] <- "HM"
+MGMT <- ForRegression %>% mutate(HM_status = relevel(HM_status, ref = 'nonHM'))
+MGMT$Age.at.diagnosis <- as.numeric(as.character(MGMT$Age.at.diagnosis))
+
+#Individual CpG sites
+cols = names(MGMT[5:31])
+model_summary = NULL
+for(i in seq_along(cols)){
+  model_fit <- glm(HM_status ~ MGMT[[cols[i]]],data = MGMT, family = "binomial")
+  OR_est <- exp(cbind(OR=coef(model_fit),confint(model_fit)))
+  p_value <- as.numeric(coef(summary(model_fit))[,4][2])
+  out <- c(OR_est[2,], p_value)
+  model_summary = rbind(model_summary, out)
+}
+rownames(model_summary) <- cols
+colnames(model_summary)[4] <- 'p.value'
+model_summary
+
+#PartDSA
+varNames = c("mol_type","PercentMethylation","Age.at.diagnosis","Sex","Extent.of.resection","TERTp.status","Initial.tumor.grade","TMZ.cycles.prior.to.recurrence")
+DSA.control(vfold=10, minsplit=10, minbuck=round(10/3), cut.off.growth=10, MPD=0.1,
+            missing="default", loss.function="default")
+model<-partDSA(x=MGMT[,varNames],y=MGMT$HM_status,
+               control=DSA.control(missing="impute.at.split") )
+#showDSA(model)
+
+#Univariate model
+mylogit <- glm(HM_status~PercentMethylation,data = MGMT, family = "binomial")
+summary(mylogit)
+mylogit_OR = exp(cbind(OR=coef(mylogit),confint(mylogit)))
+mylogit_OR
+## That is, we are 95% confident that the odds of hypermutation are 1.01 to 1.13 times greater for each additional increase in percentMethylation.
+
+#Multivariate models
+mylogit <- glm(HM_status~PercentMethylation+mol_type,data = MGMT, family = "binomial")
+summary(mylogit)
+mylogit_OR = exp(cbind(OR=coef(mylogit),confint(mylogit)))
+mylogit_OR
+
+mylogit <- glm(HM_status~PercentMethylation+Age.at.diagnosis,data = MGMT, family = "binomial")
+summary(mylogit)
+mylogit_OR = exp(cbind(OR=coef(mylogit),confint(mylogit)))
+mylogit_OR
+
+mylogit <- glm(HM_status~PercentMethylation+Age.at.diagnosis+mol_type,data = MGMT, family = "binomial")
+summary(mylogit)
+mylogit_OR = exp(cbind(OR=coef(mylogit),confint(mylogit)))
+mylogit_OR
+
+# Add binary indicator
+MGMTbinary <- MGMT
+MGMTbinary$BinaryResult <- "Low"
+MGMTbinary$BinaryResult[MGMTbinary$PercentMethylation > 42.5] <- "High"
+MGMTbinary$BinaryResult <- as.factor(MGMTbinary$BinaryResult)
+MGMTbinary$BinaryResult <- relevel(MGMTbinary$BinaryResult, ref = 'Low')
+
+# Result Table (Figure 4c)
+CrossTable(MGMTbinary$BinaryResult, MGMTbinary$HM_status, expected=FALSE, fisher=TRUE, prop.c=FALSE, prop.chisq=FALSE, prop.t=FALSE, format=c("SAS","SPSS"))
+
+# Univariate model (binary)
+mylogit <- glm(HM_status~BinaryResult,data = MGMTbinary, family = "binomial")
+summary(mylogit)
+mylogit_OR = exp(cbind(OR=coef(mylogit),confint(mylogit)))
+mylogit_OR
+
+#Multivariate models (binary)
+mylogit <- glm(HM_status~BinaryResult+mol_type,data = MGMTbinary, family = "binomial")
+summary(mylogit)
+mylogit_OR = exp(cbind(OR=coef(mylogit),confint(mylogit)))
+mylogit_OR
+
+mylogit <- glm(HM_status~BinaryResult+Age.at.diagnosis,data = MGMTbinary, family = "binomial")
+summary(mylogit)
+mylogit_OR = exp(cbind(OR=coef(mylogit),confint(mylogit)))
+mylogit_OR
+
+mylogit <- glm(HM_status~BinaryResult+Age.at.diagnosis+mol_type,data = MGMTbinary, family = "binomial")
+summary(mylogit)
+mylogit_OR = exp(cbind(OR=coef(mylogit),confint(mylogit)))
+mylogit_OR
+
+##############################################################################################################################
+# SUPPLEMENTARY TABLE
+##############################################################################################################################
+
+PatientList <- as.data.frame(ForRegression$Patient)
+colnames(PatientList)[which(names(PatientList) == "ForRegression$Patient")] <- "Patient"
+
+Johnson2014 <- list("1", "2", "4", "5", "6", "7", "8", "9", "10", "11", "12", "13", "15", "16", "17", "18", "21", "24", "25", "26", "27", "28", "29")
+vanThuijl2015 <- list(1,5,10,18,21,4,6,11,17,2,7,12,13,14,16,22)
+Mazor2015_Exome <- list(1,2,3,4,7,8,10,11,12,13,14,16,17,18,22,36,37,38,49,68,90)
+Mazor2015_RNASeq <- list(1,3,4,7,10,12,13,14,16,17,22,37,38)
+Mazor2015_Infinium <- list(1,2,3,4,7,8,10,11,12,13,14,16,17,18,22,36,38,49,68,90)
+Mazor2017_Exome <- list(14,169,68,17,21,27)
+Mazor2017_RNASeq <- list(14,169,17)
+Mazor2017_Infinium <- list(14,169,17,68,21)
+
+PatientList$BSAS <- "New"
+PatientList$ExomeSeq <- "New"
+PatientList$ExomeSeq[PatientList$Patient %in% Johnson2014 | PatientList$Patient %in% vanThuijl2015 | PatientList$Patient %in% Mazor2015_Exome | PatientList$Patient %in% Mazor2017_Exome] <- "Published"
+
+RNAdata <- na.omit(RNAdata)
+PatientList$RNASeq[PatientList$Patient %in% RNAdata$Patient] <- "New"
+PatientList$RNASeq[PatientList$Patient %in% Mazor2015_RNASeq | PatientList$Patient %in% Mazor2017_RNASeq] <- "Published"
+
+InfiniumPlot <- na.omit(InfiniumPlot)
+PatientList$Infinium[PatientList$Patient %in% InfiniumPlot$Patient] <- "New"
+PatientList$Infinium[PatientList$Patient %in% Mazor2015_Infinium | PatientList$Patient %in% Mazor2017_Infinium] <- "Published"
+
+PatientList$Johnson2014[PatientList$Patient %in% Johnson2014] <- "Johnson et al. 2014"
+PatientList$vanThuijl2015[PatientList$Patient %in% vanThuijl2015] <- "van Thuijl et al. 2015"
+PatientList$Mazor2015[PatientList$Patient %in% Mazor2015_Exome] <- "Mazor et al. 2015"
+PatientList$Mazor2015[PatientList$Patient %in% Mazor2015_RNASeq] <- "Mazor et al. 2015"
+PatientList$Mazor2015[PatientList$Patient %in% Mazor2015_Infinium] <- "Mazor et al. 2015"
+PatientList$Mazor2015[PatientList$Patient %in% Mazor2015_Exome & PatientList$Patient %in% Mazor2015_RNASeq] <- "Mazor et al. 2015"
+PatientList$Mazor2015[PatientList$Patient %in% Mazor2015_Exome & PatientList$Patient %in% Mazor2015_Infinium] <- "Mazor et al. 2015"
+PatientList$Mazor2015[PatientList$Patient %in% Mazor2015_RNASeq & PatientList$Patient %in% Mazor2015_Infinium] <- "Mazor et al. 2015"
+PatientList$Mazor2015[PatientList$Patient %in% Mazor2015_Exome & PatientList$Patient %in% Mazor2015_RNASeq & PatientList$Patient %in% Mazor2015_Infinium] <- "Mazor et al. 2015"
+PatientList$Mazor2017[PatientList$Patient %in% Mazor2017_Exome] <- "Mazor et al. 2017"
+PatientList$Mazor2017[PatientList$Patient %in% Mazor2017_RNASeq] <- "Mazor et al. 2017"
+PatientList$Mazor2017[PatientList$Patient %in% Mazor2017_Infinium] <- "Mazor et al. 2017"
+PatientList$Mazor2017[PatientList$Patient %in% Mazor2017_Exome & PatientList$Patient %in% Mazor2017_RNASeq] <- "Mazor et al. 2017"
+PatientList$Mazor2017[PatientList$Patient %in% Mazor2017_Exome & PatientList$Patient %in% Mazor2017_Infinium] <- "Mazor et al. 2017"
+PatientList$Mazor2017[PatientList$Patient %in% Mazor2017_RNASeq & PatientList$Patient %in% Mazor2017_Infinium] <- "Mazor et al. 2017"
+PatientList$Mazor2017[PatientList$Patient %in% Mazor2017_Exome & PatientList$Patient %in% Mazor2017_RNASeq & PatientList$Patient %in% Mazor2017_Infinium] <- "Mazor et al. 2017"
+PatientList$Citation <- paste(PatientList$Johnson2014, PatientList$vanThuijl2015, PatientList$Mazor2015, PatientList$Mazor2017, sep = ", ")
+PatientList$Johnson2014 <- NULL
+PatientList$vanThuijl2015 <- NULL
+PatientList$Mazor2015 <- NULL
+PatientList$Mazor2017 <- NULL
+
+TableS1 <- PatientList 
+#write_xlsx(PatientList, "~/Dropbox/Postdoc/Papers/MGMT Paper/Supplementary Table 1.xlsx", col_names = TRUE, format_headers = TRUE)
+
+MergedSuppTable <- merge(BySample, RNA, by="Sample", all.x=TRUE)
+MergedSuppTable <- merge(MergedSuppTable, Infinium, by="Sample", all.x=TRUE)
+TableS2 <- MergedSuppTable %>% 
+  mutate_if(is.numeric, round, digits = 2)
+#write_xlsx(TableS2, "~/Dropbox/Postdoc/Papers/MGMT Paper/Supplementary Table 2.xlsx", col_names = TRUE, format_headers = TRUE)
+
+TableS3 <- select(MGMTbinary, Patient, mol_type, Age.at.diagnosis, Sex, Grade.at.recurrence, TMZ.cycles.prior.to.recurrence, Extent.of.resection, Radiotherapy, source.recurrence, HM_status, PercentMethylation, BinaryResult)
+#write_xlsx(TableS3, "~/Dropbox/Postdoc/Papers/MGMT Paper/Supplementary Table 3.xlsx", col_names = TRUE, format_headers = TRUE)
+
